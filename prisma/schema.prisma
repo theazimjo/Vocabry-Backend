@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Mirrors a Firebase Auth user. The id is the Firebase UID (from the
+/// verified ID token), not a generated one — see src/middleware/auth.ts.
+model User {
+  id          String   @id
+  email       String?  @unique
+  displayName String?
+  photoUrl    String?
+  createdAt   DateTime @default(now())
+
+  packs             Pack[]
+  folders           Folder[]
+  corpUser          CorpUser?
+  groupMemberships  GroupMembership[]
+}
+
+model Folder {
+  id     String @id @default(cuid())
+  name   String
+  icon   String?
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+  packs  Pack[]
+}
+
+model Pack {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  icon        String?
+  color       String?
+  level       String?
+  language    String?
+  userId      String
+  user        User    @relation(fields: [userId], references: [id])
+  folderId    String?
+  folder      Folder? @relation(fields: [folderId], references: [id])
+  words       Word[]
+}
+
+model Word {
+  id           String  @id @default(cuid())
+  packId       String
+  pack         Pack    @relation(fields: [packId], references: [id], onDelete: Cascade)
+  word         String
+  translation  String?
+  definition   String?
+  example      String?
+  notes        String?
+  partOfSpeech String?
+}
+
+model Center {
+  id      String @id @default(cuid())
+  name    String
+  email   String?
+  phone   String?
+  address String?
+
+  corpUsers   CorpUser[]
+  groups      Group[]
+  customPacks CorpPack[]
+}
+
+enum CorpRole {
+  CENTER_ADMIN
+  TEACHER
+}
+
+/// A user's staff membership in exactly one center. Authorization for
+/// everything under a center (see routes/corp) is derived from this row,
+/// looked up server-side — never trusted from a client-supplied claim.
+model CorpUser {
+  id       String   @id @default(cuid())
+  userId   String   @unique
+  user     User     @relation(fields: [userId], references: [id])
+  centerId String
+  center   Center   @relation(fields: [centerId], references: [id])
+  role     CorpRole
+  name     String?
+  phone    String?
+  disabled Boolean  @default(false)
+
+  groupsTaught Group[]
+}
+
+model Group {
+  id        String   @id @default(cuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id])
+  teacherId String
+  teacher   CorpUser @relation(fields: [teacherId], references: [id])
+  name      String
+  level     String?
+  status    String   @default("active")
+  /// The 6-digit PIN students enter to join — the only thing about a group
+  /// that's meant to be guessable/public. Looked up server-side by
+  /// POST /groups/join; never exposed as a way to bypass membership checks.
+  joinCode  String   @unique
+
+  memberships GroupMembership[]
+}
+
+/// Server-side source of truth for "is this user actually in this group".
+/// Written only by POST /groups/join after verifying a group code — never
+/// by the client directly. This is the fix for the VOC RTDB vulnerability:
+/// the old Firebase rules authorized reads off a copy of this same fact
+/// that the *client* wrote into its own user record (users/$uid/
+/// groupMembership), which any authenticated client could forge to read
+/// any center's data. Here, read access is checked against this table,
+/// which only the join endpoint's server-side logic can write.
+model GroupMembership {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  groupId  String
+  group    Group    @relation(fields: [groupId], references: [id])
+  joinedAt DateTime @default(now())
+
+  @@unique([userId, groupId])
+}
+
+model CorpPack {
+  id       String  @id @default(cuid())
+  centerId String
+  center   Center  @relation(fields: [centerId], references: [id])
+  ownerUid String?
+  name     String
+}
