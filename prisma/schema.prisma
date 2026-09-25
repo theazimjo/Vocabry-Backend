@@ -16,10 +16,11 @@ model User {
   photoUrl    String?
   createdAt   DateTime @default(now())
 
-  packs             Pack[]
-  folders           Folder[]
-  corpUser          CorpUser?
-  groupMemberships  GroupMembership[]
+  packs               Pack[]
+  folders             Folder[]
+  corpUser            CorpUser?
+  groupMemberships    GroupMembership[]
+  teacherJoinRequest  TeacherJoinRequest?
 }
 
 model Folder {
@@ -59,15 +60,22 @@ model Word {
 }
 
 model Center {
-  id      String @id @default(cuid())
-  name    String
-  email   String?
-  phone   String?
-  address String?
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  adminEmail String?
+  status    String   @default("active")
+  /// Persistent per-center code a prospective teacher enters to request
+  /// joining (distinct from a Group's per-group joinCode). Nullable until
+  /// a center admin first requests one — see POST /corp/centers/:id/teacher-join-code.
+  teacherJoinCode String? @unique
 
-  corpUsers   CorpUser[]
-  groups      Group[]
-  customPacks CorpPack[]
+  corpUsers    CorpUser[]
+  groups       Group[]
+  customPacks  CorpPack[]
+  joinRequests TeacherJoinRequest[]
 }
 
 enum CorpRole {
@@ -126,6 +134,23 @@ model GroupMembership {
   joinedAt DateTime @default(now())
 
   @@unique([userId, groupId])
+}
+
+/// A personal-account user's not-yet-approved request to become a teacher
+/// at a center (via Center.teacherJoinCode). Approving it (center_admin
+/// only, see POST .../join-requests/:uid/approve) creates the CorpUser row
+/// and deletes this request; nothing here grants access by itself.
+model TeacherJoinRequest {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  centerId    String
+  center      Center   @relation(fields: [centerId], references: [id])
+  name        String
+  phone       String?
+  requestedAt DateTime @default(now())
+
+  @@unique([userId])
 }
 
 model CorpPack {

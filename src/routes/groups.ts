@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
+import { pstr } from '../lib/params.js';
 
 export const groupsRouter = Router();
 
@@ -39,7 +40,7 @@ groupsRouter.post('/join', async (req, res) => {
 /// Firebase rules be bypassed (see prisma/schema.prisma on GroupMembership).
 groupsRouter.get('/:groupId', async (req, res) => {
   const group = await prisma.group.findUnique({
-    where: { id: req.params.groupId },
+    where: { id: pstr(req.params.groupId) },
     include: { memberships: { include: { user: true } } },
   });
   if (!group) {

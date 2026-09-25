@@ -7,13 +7,14 @@ declare global {
   namespace Express {
     interface Request {
       uid: string;
+      email: string | null;
     }
   }
 }
 
 /// Requires a valid Firebase ID token in `Authorization: Bearer <token>`.
-/// On success, req.uid is the verified Firebase UID — every route below
-/// this middleware must use req.uid (never a body/query param) as the
+/// On success, req.uid/req.email come from the verified token — every route
+/// below this middleware must use those (never a body/query param) as the
 /// identity for authorization checks.
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization ?? '';
@@ -25,6 +26,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   try {
     const decoded = await firebaseAuth.verifyIdToken(token);
     req.uid = decoded.uid;
+    req.email = decoded.email ?? null;
 
     await prisma.user.upsert({
       where: { id: decoded.uid },
