@@ -16,19 +16,26 @@ model User {
   photoUrl    String?
   createdAt   DateTime @default(now())
 
-  packs               Pack[]
-  folders             Folder[]
-  corpUser            CorpUser?
-  groupMemberships    GroupMembership[]
-  teacherJoinRequest  TeacherJoinRequest?
+  /// Personal daily target the student sets for themself — lives on the
+  /// account, not any one group's membership row, so it survives switching
+  /// groups (mirrors users/{uid}/profile/wordTarget in the old RTDB tree).
+  wordTarget Int?
+
+  packs              Pack[]
+  folders            Folder[]
+  corpUser           CorpUser?
+  groupMemberships   GroupMembership[]
+  teacherJoinRequest TeacherJoinRequest?
+  grammarAttempts    GrammarAttempt[]
+  errorLogs          ErrorLog[]
 }
 
 model Folder {
-  id     String @id @default(cuid())
+  id     String  @id @default(cuid())
   name   String
   icon   String?
   userId String
-  user   User   @relation(fields: [userId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
   packs  Pack[]
 }
 
@@ -60,13 +67,13 @@ model Word {
 }
 
 model Center {
-  id        String   @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  address   String?
-  adminEmail String?
-  status    String   @default("active")
+  id              String  @id @default(cuid())
+  name            String
+  email           String?
+  phone           String?
+  address         String?
+  adminEmail      String?
+  status          String  @default("active")
   /// Persistent per-center code a prospective teacher enters to request
   /// joining (distinct from a Group's per-group joinCode). Nullable until
   /// a center admin first requests one — see POST /corp/centers/:id/teacher-join-code.
@@ -101,20 +108,25 @@ model CorpUser {
 }
 
 model Group {
-  id        String   @id @default(cuid())
-  centerId  String
-  center    Center   @relation(fields: [centerId], references: [id])
-  teacherId String
-  teacher   CorpUser @relation(fields: [teacherId], references: [id])
-  name      String
-  level     String?
-  status    String   @default("active")
+  id              String   @id @default(cuid())
+  centerId        String
+  center          Center   @relation(fields: [centerId], references: [id])
+  teacherId       String
+  teacher         CorpUser @relation(fields: [teacherId], references: [id])
+  name            String
+  level           String?
+  status          String   @default("active")
   /// The 6-digit PIN students enter to join — the only thing about a group
   /// that's meant to be guessable/public. Looked up server-side by
   /// POST /groups/join; never exposed as a way to bypass membership checks.
-  joinCode  String   @unique
+  joinCode        String   @unique
+  /// CorpPack ids assigned to this group (kept as a plain id list, like the
+  /// old RTDB centers/$id/groups/$id/assignedPacks — packs are shared
+  /// center-wide content, not owned by any one group).
+  assignedPackIds Json     @default("[]")
 
   memberships GroupMembership[]
+  homework    HomeworkAssignment[]
 }
 
 /// Server-side source of truth for "is this user actually in this group".
@@ -132,6 +144,21 @@ model GroupMembership {
   groupId  String
   group    Group    @relation(fields: [groupId], references: [id])
   joinedAt DateTime @default(now())
+
+  /// The student's own display name/color on this group's roster — separate
+  /// from User.displayName so a student can present differently per group.
+  /// Only the student themself may write their own row (see PATCH
+  /// /groups/:groupId/me) — a teacher's roster view is read-only for these.
+  displayName String?
+  avatarColor String?
+
+  /// Per-pack, per-unit mastery snapshot: { [packId]: { units: { [unitKey]:
+  /// { wordsLearned, totalWords, masteryPercent, retentionPercent,
+  /// atRiskCount, lastActivity } } } }. Written only by the student
+  /// themself (PATCH /groups/:groupId/me) — teachers have no read access to
+  /// a student's raw word-level data, so this is what their roster reads
+  /// instead, same trade-off the old RTDB tree made.
+  progress Json @default("{}")
 
   @@unique([userId, groupId])
 }
@@ -153,10 +180,85 @@ model TeacherJoinRequest {
   @@unique([userId])
 }
 
+/// A center's shared vocabulary pack (distinct from a personal Pack).
+/// Words are kept as an embedded JSON array (matching the old RTDB shape
+/// { word, translation, definition, example }[]) rather than a relation —
+/// a center pack is always read/written as one whole document, never
+/// queried per-word, so there's nothing a relational Word table would buy
+/// here that the personal-library Pack/Word split earns for that case.
 model CorpPack {
-  id       String  @id @default(cuid())
-  centerId String
-  center   Center  @relation(fields: [centerId], references: [id])
-  ownerUid String?
-  name     String
+  id          String   @id @default(cuid())
+  centerId    String
+  center      Center   @relation(fields: [centerId], references: [id])
+  /// Set only for a teacher's private pack (vs. a center-wide shared one);
+  /// see requireCenterStaff + the ownerUid check in routes/corpPacks.ts.
+  ownerUid    String?
+  title       String
+  level       String   @default("Elementary")
+  description String?
+  language    String   @default("en-US")
+  words       Json     @default("[]")
+  createdAt   DateTime @default(now())
+}
+
+enum GrammarAttemptStatus {
+  PENDING
+  REVIEWED
+}
+
+/// A "complex" grammar test submission that needs a human to grade it
+/// (e.g. free-form writing), as opposed to auto-scored exercises which
+/// never touch the backend. Starts PENDING or, once a super admin scores
+/// it (PATCH /grammar/attempts/:id), REVIEWED.
+model GrammarAttempt {
+  id           String               @id @default(cuid())
+  userId       String
+  user         User                 @relation(fields: [userId], references: [id])
+  testTitle    String?
+  studentName  String?
+  studentEmail String?
+  answers      Json
+  status       GrammarAttemptStatus @default(PENDING)
+  score        Int?
+  createdAt    DateTime             @default(now())
+  reviewedAt   DateTime?
+}
+
+/// Client-side error reports (POST /errors, no auth requirement beyond a
+/// valid session so anonymous crashes still get logged against a userId
+/// when there is one). Read access is super-admin only.
+model ErrorLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  message   String
+  stack     String?
+  url       String?
+  userAgent String?
+  context   String?
+  createdAt DateTime @default(now())
+}
+
+/// Platform-wide announcement from a super admin, shown to center admins
+/// and/or teachers depending on `target`.
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String   @default("info")
+  target    String   @default("all")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+/// One round of homework a teacher assigns to a group — additive, never
+/// replaces a past round (see POST .../groups/:groupId/homework).
+/// `items` is [{ packId, monthId, unitId, packTitle, unitTitle, totalWords }].
+model HomeworkAssignment {
+  id         String   @id @default(cuid())
+  groupId    String
+  group      Group    @relation(fields: [groupId], references: [id])
+  name       String
+  items      Json
+  assignedAt DateTime @default(now())
 }
