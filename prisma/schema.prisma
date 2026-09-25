@@ -64,6 +64,31 @@ model Word {
   example      String?
   notes        String?
   partOfSpeech String?
+
+  /// Spaced-repetition progress (see VOC's src/utils/spacedRepetition.js,
+  /// applyReview()/initWordProgress()). This state is computed entirely
+  /// client-side — response timing, confidence self-rating, the memory-
+  /// stability curve — the backend just stores and returns whatever the
+  /// client sends, the same trust boundary as word/translation/etc. above,
+  /// not a server-side re-implementation of the algorithm.
+  mastery            Int?      @default(0)
+  interval           Float?    @default(0)
+  reviewCount        Int?      @default(0)
+  nextReview         DateTime?
+  lastReviewed       DateTime?
+  stability          Float?
+  activeRecallPasses Int?      @default(0)
+  confirmedModes     Json?     @default("[]")
+}
+
+/// A crowd-sourced difficulty signal, aggregated across all users by
+/// normalized word text (see normalizeWordKey in VOC's
+/// src/experiment/experimentDB.js — lowercase + trim, no per-user split).
+/// totalReviews only ever increases; totalCorrect <= totalReviews always.
+model GlobalWordStat {
+  wordKey      String @id
+  totalReviews Int    @default(0)
+  totalCorrect Int    @default(0)
 }
 
 model Center {

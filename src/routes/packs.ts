@@ -78,7 +78,27 @@ const wordSchema = z.object({
   example: z.string().max(3000).optional(),
   notes: z.string().max(2000).optional(),
   partOfSpeech: z.string().max(50).optional(),
+  mastery: z.number().min(0).max(100).optional(),
+  interval: z.number().min(0).optional(),
+  reviewCount: z.number().int().min(0).optional(),
+  nextReview: z.string().datetime().nullable().optional(),
+  lastReviewed: z.string().datetime().nullable().optional(),
+  stability: z.number().min(0).optional(),
+  activeRecallPasses: z.number().int().min(0).optional(),
+  confirmedModes: z.array(z.string()).optional(),
 });
+
+/// Prisma's generated types want an actual Date (or null) for a DateTime?
+/// field, never `undefined` — but zod's `.optional()` leaves the key out of
+/// `parsed.data` entirely when the client didn't send it, and `.nullable()`
+/// lets it send `null` to explicitly clear the field. This turns the
+/// validated ISO string/null/undefined into what Prisma expects, and is
+/// spread into the `data` object so an absent field is left out rather than
+/// set to `undefined`.
+function dateField<K extends string>(key: K, value: string | null | undefined): { [P in K]?: Date | null } {
+  if (value === undefined) return {};
+  return { [key]: value === null ? null : new Date(value) } as { [P in K]?: Date | null };
+}
 
 /// Every word route below re-checks pack ownership itself (rather than
 /// trusting a wordId alone) — a wordId doesn't encode who owns its pack,
@@ -97,7 +117,15 @@ packsRouter.post('/:packId/words', async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
-  const word = await prisma.word.create({ data: { ...parsed.data, packId: pstr(req.params.packId) } });
+  const { nextReview, lastReviewed, ...rest } = parsed.data;
+  const word = await prisma.word.create({
+    data: {
+      ...rest,
+      packId: pstr(req.params.packId),
+      ...dateField('nextReview', nextReview),
+      ...dateField('lastReviewed', lastReviewed),
+    },
+  });
   res.status(201).json(word);
 });
 
@@ -109,9 +137,14 @@ packsRouter.patch('/:packId/words/:wordId', async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
+  const { nextReview, lastReviewed, ...rest } = parsed.data;
   const { count } = await prisma.word.updateMany({
     where: { id: pstr(req.params.wordId), packId: pstr(req.params.packId) },
-    data: parsed.data,
+    data: {
+      ...rest,
+      ...dateField('nextReview', nextReview),
+      ...dateField('lastReviewed', lastReviewed),
+    },
   });
   if (count === 0) return res.status(404).json({ error: 'Word not found' });
   res.json(await prisma.word.findUnique({ where: { id: pstr(req.params.wordId) } }));
