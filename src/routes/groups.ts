@@ -60,3 +60,70 @@ groupsRouter.get('/:groupId', async (req, res) => {
 
   res.json(group);
 });
+
+const meUpdateSchema = z.object({
+  displayName: z.string().max(200).optional(),
+  avatarColor: z.string().max(50).optional(),
+  progress: z
+    .object({
+      packId: z.string(),
+      unitKey: z.string(),
+      stats: z.object({
+        wordsLearned: z.number().optional(),
+        totalWords: z.number().optional(),
+        masteryPercent: z.number().optional(),
+        retentionPercent: z.number().optional(),
+        atRiskCount: z.number().optional(),
+      }),
+    })
+    .optional(),
+});
+
+/// The only route that writes a GroupMembership's displayName/avatarColor/
+/// progress — owning the row (userId === req.uid) is the whole authorization
+/// check, deliberately with no teacher-write path (mirrors the old RTDB rule
+/// students/$studentId .write: auth.uid === $studentId).
+groupsRouter.patch('/:groupId/me', async (req, res) => {
+  const membership = await prisma.groupMembership.findUnique({
+    where: { userId_groupId: { userId: req.uid, groupId: pstr(req.params.groupId) } },
+  });
+  if (!membership) {
+    return res.status(404).json({ error: 'Not a member of this group' });
+  }
+
+  const parsed = meUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  const { displayName, avatarColor, progress } = parsed.data;
+
+  const data: { displayName?: string; avatarColor?: string; progress?: object } = {};
+  if (displayName !== undefined) data.displayName = displayName;
+  if (avatarColor !== undefined) data.avatarColor = avatarColor;
+
+  if (progress) {
+    const existing = (membership.progress as Record<string, { units?: Record<string, unknown> }>) ?? {};
+    const { packId, unitKey, stats } = progress;
+    const pack = existing[packId] ?? { units: {} };
+    data.progress = {
+      ...existing,
+      [packId]: {
+        ...pack,
+        units: {
+          ...pack.units,
+          [unitKey]: {
+            wordsLearned: stats.wordsLearned ?? 0,
+            totalWords: stats.totalWords ?? 0,
+            masteryPercent: stats.masteryPercent ?? 0,
+            retentionPercent: stats.retentionPercent ?? 0,
+            atRiskCount: stats.atRiskCount ?? 0,
+            lastActivity: new Date().toISOString(),
+          },
+        },
+      },
+    };
+  }
+
+  const updated = await prisma.groupMembership.update({ where: { id: membership.id }, data });
+  res.json(updated);
+});

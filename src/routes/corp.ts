@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { randomJoinCode } from '../lib/joinCode.js';
 import { requireCenterStaff } from '../middleware/roles.js';
 import { corpGroupsRouter } from './corpGroups.js';
+import { corpPacksRouter } from './corpPacks.js';
 import { pstr } from '../lib/params.js';
 
 /// Mounted at /corp with requireAuth already applied in index.ts.
@@ -152,3 +153,4 @@ corpRouter.post(
 );
 
 corpRouter.use('/centers/:centerId/groups', corpGroupsRouter);
+corpRouter.use('/centers/:centerId/packs', corpPacksRouter);

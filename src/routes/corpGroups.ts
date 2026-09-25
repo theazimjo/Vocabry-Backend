@@ -4,10 +4,15 @@ import { prisma } from '../lib/prisma.js';
 import { randomJoinCode } from '../lib/joinCode.js';
 import { requireCenterStaff } from '../middleware/roles.js';
 import { pstr } from '../lib/params.js';
+import { corpHomeworkRouter } from './corpHomework.js';
 
 /// Mounted at /corp/centers/:centerId/groups (see routes/corp.ts) with
 /// { mergeParams: true } so req.params.centerId is available here.
 export const corpGroupsRouter = Router({ mergeParams: true });
+
+/// mergeParams cascades through this nested mount too, so corpHomeworkRouter
+/// sees both :centerId and :groupId.
+corpGroupsRouter.use('/:groupId/homework', corpHomeworkRouter);
 
 const createGroupSchema = z.object({
   name: z.string().min(1).max(200),

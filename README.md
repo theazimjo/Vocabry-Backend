@@ -12,7 +12,25 @@ Node.js + TypeScript, Express, Prisma, PostgreSQL, Firebase Admin SDK (token ver
 
 ## Status
 
-Skeleton — not yet wired up to the VOC frontend. Implemented so far: auth middleware, `User`/`Pack`/`Folder`/`Word` (personal library) and `Center`/`CorpUser`/`Group`/`GroupMembership`/`CorpPack` (learning-center platform) models, and example routes (`/me`, `/packs`, `/groups`). Everything else in VOC's RTDB tree (grammar attempts, error logs, teacher invites, announcements, ...) still needs modeling and porting — do that incrementally, one Firebase read/write call site at a time, not as one big migration.
+Not yet wired up to the VOC frontend, but most of VOC's RTDB tree is now modeled and routed:
+
+| Domain | Routes | Notes |
+| --- | --- | --- |
+| Auth | — | `requireAuth` (`src/middleware/auth.ts`) verifies the Firebase ID token, upserts `User` |
+| Personal library | `/me`, `/folders`, `/packs`, `/packs/:packId/words` | full CRUD |
+| Word target | `PATCH /me/word-target` | |
+| Groups (student-facing) | `POST /groups/join`, `GET /groups/:groupId`, `PATCH /groups/:groupId/me` | join by PIN, self-service roster/progress update |
+| Super admin | `/admin/centers`, `/admin/centers/:id/admin-account`, `/admin/corp-users` | creates centers + center-admin Firebase accounts via Admin SDK |
+| Center (staff) | `GET /corp/centers/:id`, `/corp/centers/:id/teachers`, `/corp/centers/:id/teacher-join-code[/regenerate]` | |
+| Teacher join flow | `/corp/join-requests`, `/corp/centers/:id/join-requests[/:uid/approve\|reject]` | self-service request → center_admin approval |
+| Groups (staff-facing) | `/corp/centers/:id/groups`, `.../:groupId/students`, `.../:groupId` (patch) | teacher sees own groups, center_admin sees all |
+| Custom packs | `/corp/centers/:id/packs`, `.../:packId/assign/:groupId` | shared or teacher-private, assignable to groups |
+| Homework | `/corp/centers/:id/groups/:groupId/homework` | additive rounds, auto-named |
+| Grammar attempts | `/grammar/attempts[/me]` | student submits, super admin scores |
+| Error logs | `POST /errors`, `GET /errors` (super admin) | |
+| Announcements | `/announcements/active`, `/announcements` (super admin CRUD) | role-targeted |
+
+Still missing: reading/porting the memory engine's own data (word stats, spaced-repetition state — `src/utils/memoryEngine.js` and friends in the VOC repo aren't backend concerns yet, they run client-side against whatever store eventually holds word review history), and the actual frontend migration below.
 
 ## Local setup
 
